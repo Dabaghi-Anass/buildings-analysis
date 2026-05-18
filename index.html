@@ -1,0 +1,1460 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BuildScan — Aerial Building Classifier</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"
+    />
+
+    <style>
+      :root {
+        --bg: #0a0c0f;
+        --surface: #111418;
+        --surface2: #181c22;
+        --surface3: #1e242d;
+        --border: #252b34;
+        --accent: #00e5b4;
+        --accent2: #7b61ff;
+        --accent3: #ff6b35;
+        --text: #e8edf5;
+        --muted: #5a6475;
+        --danger: #ff4444;
+        --warn: #ffb800;
+
+        --clip-color: #00e5b4;
+        --rf-color: #7b61ff;
+        --hybrid-color: #ff6b35;
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: 'Syne', sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        height: 100vh;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+
+      /* ── Header ── */
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 24px;
+        height: 52px;
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+        z-index: 1000;
+      }
+
+      .logo {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 17px;
+        font-weight: 800;
+        letter-spacing: -0.5px;
+      }
+
+      .logo-dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 10px var(--accent);
+        animation: pulse 2s ease-in-out infinite;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+          transform: scale(1);
+        }
+        50% {
+          opacity: 0.55;
+          transform: scale(0.8);
+        }
+      }
+
+      .header-right {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-family: 'DM Mono', monospace;
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      .pill {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 20px;
+        border: 1px solid var(--border);
+        background: var(--surface2);
+        white-space: nowrap;
+      }
+
+      .sdot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--muted);
+        flex-shrink: 0;
+      }
+      .sdot.ok {
+        background: var(--accent);
+        box-shadow: 0 0 6px var(--accent);
+      }
+      .sdot.warn {
+        background: var(--warn);
+      }
+      .sdot.err {
+        background: var(--danger);
+      }
+
+      /* ── Layout ── */
+      .layout {
+        display: flex;
+        flex: 1;
+        overflow: hidden;
+      }
+
+      /* ── Sidebar ── */
+      .sidebar {
+        width: 320px;
+        flex-shrink: 0;
+        background: var(--surface);
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      .sidebar-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 18px 16px;
+      }
+
+      .sidebar-body::-webkit-scrollbar {
+        width: 3px;
+      }
+      .sidebar-body::-webkit-scrollbar-thumb {
+        background: var(--border);
+        border-radius: 3px;
+      }
+
+      .sec-label {
+        font-size: 9.5px;
+        font-weight: 700;
+        letter-spacing: 1.6px;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 10px;
+      }
+
+      /* ── Mode cards ── */
+      .mode-cards {
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+        margin-bottom: 20px;
+      }
+
+      .mode-card {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 12px;
+        border-radius: 9px;
+        border: 1.5px solid var(--border);
+        background: var(--surface2);
+        cursor: pointer;
+        transition:
+          border-color 0.15s,
+          background 0.15s;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .mode-card::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        transition: opacity 0.15s;
+      }
+
+      .mode-card[data-mode='clip_mlp']::after {
+        background: linear-gradient(
+          135deg,
+          rgba(0, 229, 180, 0.06),
+          transparent 60%
+        );
+      }
+      .mode-card[data-mode='rf_detr']::after {
+        background: linear-gradient(
+          135deg,
+          rgba(123, 97, 255, 0.06),
+          transparent 60%
+        );
+      }
+      .mode-card[data-mode='rf_detr_clip']::after {
+        background: linear-gradient(
+          135deg,
+          rgba(255, 107, 53, 0.06),
+          transparent 60%
+        );
+      }
+
+      .mode-card.active::after {
+        opacity: 1;
+      }
+      .mode-card.active[data-mode='clip_mlp'] {
+        border-color: var(--clip-color);
+      }
+      .mode-card.active[data-mode='rf_detr'] {
+        border-color: var(--rf-color);
+      }
+      .mode-card.active[data-mode='rf_detr_clip'] {
+        border-color: var(--hybrid-color);
+      }
+
+      .radio-dot {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        border: 2px solid var(--border);
+        flex-shrink: 0;
+        margin-top: 3px;
+        position: relative;
+        transition: border-color 0.15s;
+      }
+
+      .radio-dot::after {
+        content: '';
+        position: absolute;
+        inset: 2px;
+        border-radius: 50%;
+        background: var(--bg);
+        opacity: 0;
+        transition: opacity 0.15s;
+      }
+
+      .mode-card.active .radio-dot::after {
+        opacity: 1;
+      }
+      .mode-card.active[data-mode='clip_mlp'] .radio-dot {
+        border-color: var(--clip-color);
+        background: var(--clip-color);
+      }
+      .mode-card.active[data-mode='rf_detr'] .radio-dot {
+        border-color: var(--rf-color);
+        background: var(--rf-color);
+      }
+      .mode-card.active[data-mode='rf_detr_clip'] .radio-dot {
+        border-color: var(--hybrid-color);
+        background: var(--hybrid-color);
+      }
+
+      .mode-body {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .mode-name {
+        font-size: 12px;
+        font-weight: 700;
+        margin-bottom: 3px;
+        position: relative;
+      }
+
+      .mode-card[data-mode='clip_mlp'] .mode-name {
+        color: var(--clip-color);
+      }
+      .mode-card[data-mode='rf_detr'] .mode-name {
+        color: var(--rf-color);
+      }
+      .mode-card[data-mode='rf_detr_clip'] .mode-name {
+        color: var(--hybrid-color);
+      }
+
+      .mode-desc {
+        font-size: 10.5px;
+        color: var(--muted);
+        line-height: 1.5;
+        font-family: 'DM Mono', monospace;
+        position: relative;
+      }
+
+      .mode-tag {
+        font-size: 9px;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        flex-shrink: 0;
+        align-self: flex-start;
+        position: relative;
+      }
+
+      .tag-clip {
+        background: rgba(0, 229, 180, 0.14);
+        color: var(--clip-color);
+      }
+      .tag-rf {
+        background: rgba(123, 97, 255, 0.14);
+        color: var(--rf-color);
+      }
+      .tag-hybrid {
+        background: rgba(255, 107, 53, 0.14);
+        color: var(--hybrid-color);
+      }
+
+      /* ── Controls ── */
+      .controls {
+        margin-bottom: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .ctrl-row {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .ctrl-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .ctrl-label {
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      .ctrl-val {
+        font-family: 'DM Mono', monospace;
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      .val-teal {
+        color: var(--accent);
+      }
+      .val-purple {
+        color: var(--rf-color);
+      }
+
+      input[type='range'] {
+        width: 100%;
+        -webkit-appearance: none;
+        height: 3px;
+        border-radius: 3px;
+        background: var(--border);
+        outline: none;
+      }
+
+      input[type='range']::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: var(--accent);
+        cursor: pointer;
+        box-shadow: 0 0 8px rgba(0, 229, 180, 0.45);
+      }
+
+      /* Cell size slider — purple when in RF-DETR mode */
+      #cellSlider::-webkit-slider-thumb {
+        background: var(--rf-color);
+        box-shadow: 0 0 8px rgba(123, 97, 255, 0.45);
+      }
+
+      .ctrl-row.hidden {
+        display: none;
+      }
+
+      /* ── Info box ── */
+      .info-box {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px 12px;
+        font-family: 'DM Mono', monospace;
+        font-size: 10.5px;
+        color: var(--muted);
+        line-height: 1.6;
+        margin-bottom: 16px;
+      }
+
+      .info-box.hidden {
+        display: none;
+      }
+      .info-hl {
+        color: var(--rf-color);
+        font-weight: 500;
+      }
+
+      /* ── Run button ── */
+      .run-btn {
+        width: 100%;
+        padding: 13px;
+        border-radius: 9px;
+        border: none;
+        font-family: 'Syne', sans-serif;
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+        position: relative;
+        overflow: hidden;
+        transition:
+          transform 0.15s,
+          opacity 0.15s;
+        margin-bottom: 18px;
+      }
+
+      .run-btn::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(135deg, var(--accent) 0%, #00bfd4 100%);
+        transition: opacity 0.2s;
+      }
+
+      .run-btn span {
+        position: relative;
+        z-index: 1;
+        color: #07120f;
+      }
+      .run-btn:hover:not(:disabled) {
+        transform: scale(1.01);
+      }
+      .run-btn:active:not(:disabled) {
+        transform: scale(0.98);
+      }
+      .run-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+
+      .run-btn.loading::before {
+        background: linear-gradient(
+          270deg,
+          var(--accent),
+          #00bfd4,
+          var(--accent)
+        );
+        background-size: 400% 100%;
+        animation: sweep 1.4s linear infinite;
+      }
+
+      @keyframes sweep {
+        0% {
+          background-position: 0% 50%;
+        }
+        100% {
+          background-position: 100% 50%;
+        }
+      }
+
+      /* ── Stats ── */
+      .stats-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 7px;
+        margin-bottom: 16px;
+      }
+
+      .stat-box {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        padding: 9px 8px;
+        text-align: center;
+      }
+
+      .stat-n {
+        font-family: 'DM Mono', monospace;
+        font-size: 18px;
+        font-weight: 500;
+        color: var(--accent);
+      }
+
+      .stat-k {
+        font-size: 8.5px;
+        color: var(--muted);
+        letter-spacing: 0.9px;
+        text-transform: uppercase;
+        margin-top: 1px;
+      }
+
+      /* ── Results list ── */
+      .results-list {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+
+      .r-item {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        padding: 9px 11px;
+        cursor: pointer;
+        transition: border-color 0.13s;
+      }
+
+      .r-item:hover {
+        border-color: var(--muted);
+      }
+      .r-item.selected {
+        border-color: var(--accent);
+      }
+
+      .r-top {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin-bottom: 5px;
+      }
+
+      .r-name {
+        font-size: 11px;
+        font-weight: 600;
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .r-badge {
+        font-family: 'DM Mono', monospace;
+        font-size: 9.5px;
+        padding: 2px 7px;
+        border-radius: 4px;
+        font-weight: 500;
+        flex-shrink: 0;
+      }
+
+      .r-conf {
+        font-family: 'DM Mono', monospace;
+        font-size: 10.5px;
+        color: var(--muted);
+        flex-shrink: 0;
+      }
+
+      .r-bar {
+        height: 2px;
+        border-radius: 2px;
+        background: var(--border);
+      }
+
+      .r-fill {
+        height: 100%;
+        border-radius: 2px;
+        transition: width 0.35s ease;
+      }
+
+      /* sub-detections */
+      .r-subs {
+        margin-top: 7px;
+        padding-top: 7px;
+        border-top: 1px solid var(--border);
+        display: none;
+        gap: 4px;
+        flex-direction: column;
+      }
+
+      .r-item.open .r-subs {
+        display: flex;
+      }
+
+      .r-sub {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-family: 'DM Mono', monospace;
+        font-size: 9.5px;
+        color: var(--muted);
+      }
+
+      .sub-icon {
+        color: var(--rf-color);
+      }
+      .sub-clip {
+        color: var(--hybrid-color);
+      }
+
+      /* class colours */
+      .cls-Business {
+        background: rgba(0, 229, 180, 0.13);
+        color: var(--clip-color);
+      }
+      .cls-Immeuble {
+        background: rgba(123, 97, 255, 0.13);
+        color: var(--rf-color);
+      }
+      .cls-Industrielle {
+        background: rgba(255, 107, 53, 0.13);
+        color: var(--hybrid-color);
+      }
+      .cls-Maison {
+        background: rgba(255, 184, 0, 0.13);
+        color: var(--warn);
+      }
+      .cls-Villa {
+        background: rgba(255, 68, 68, 0.13);
+        color: var(--danger);
+      }
+      .cls-unknown {
+        background: rgba(90, 100, 117, 0.13);
+        color: var(--muted);
+      }
+
+      /* ── Map ── */
+      #map {
+        flex: 1;
+        position: relative;
+      }
+      .leaflet-tile-pane {
+        filter: brightness(0.82) saturate(1.1);
+      }
+
+      .leaflet-popup-content-wrapper {
+        background: var(--surface) !important;
+        border: 1px solid var(--border) !important;
+        border-radius: 9px !important;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.65) !important;
+        color: var(--text) !important;
+        font-family: 'Syne', sans-serif !important;
+        min-width: 220px;
+      }
+      .leaflet-popup-tip {
+        background: var(--surface) !important;
+      }
+
+      .pu-head {
+        font-size: 12px;
+        font-weight: 700;
+        margin-bottom: 9px;
+      }
+      .pu-row {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        font-family: 'DM Mono', monospace;
+        font-size: 10.5px;
+        color: var(--muted);
+        margin-bottom: 4px;
+      }
+      .pu-val {
+        color: var(--text);
+        margin-left: auto;
+      }
+      .pu-dets {
+        margin-top: 9px;
+        border-top: 1px solid var(--border);
+        padding-top: 8px;
+      }
+      .pu-det-row {
+        display: flex;
+        justify-content: space-between;
+        font-family: 'DM Mono', monospace;
+        font-size: 10px;
+        margin-bottom: 3px;
+      }
+
+      /* grid overlay label */
+      .grid-label {
+        background: rgba(123, 97, 255, 0.15);
+        border: 1px solid rgba(123, 97, 255, 0.4);
+        color: #9d8fff;
+        font-family: 'DM Mono', monospace;
+        font-size: 9px;
+        padding: 1px 5px;
+        border-radius: 3px;
+        pointer-events: none;
+      }
+
+      /* ── Empty state ── */
+      .empty {
+        text-align: center;
+        padding: 28px 12px;
+        color: var(--muted);
+      }
+      .empty-ico {
+        font-size: 28px;
+        margin-bottom: 8px;
+        opacity: 0.35;
+      }
+      .empty-txt {
+        font-size: 11px;
+        line-height: 1.65;
+      }
+
+      /* ── Toast ── */
+      #toast {
+        position: fixed;
+        bottom: 22px;
+        right: 22px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        padding: 11px 16px;
+        font-family: 'DM Mono', monospace;
+        font-size: 11.5px;
+        z-index: 9999;
+        transform: translateY(70px);
+        opacity: 0;
+        transition: all 0.28s cubic-bezier(0.17, 0.67, 0.43, 0.99);
+        max-width: 260px;
+      }
+      #toast.show {
+        transform: translateY(0);
+        opacity: 1;
+      }
+      #toast.ok {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      #toast.err {
+        border-color: var(--danger);
+        color: var(--danger);
+      }
+      #toast.info {
+        border-color: var(--rf-color);
+        color: var(--rf-color);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="logo">
+        <div class="logo-dot"></div>
+        BuildScan
+      </div>
+      <div class="header-right">
+        <div class="pill">
+          <div class="sdot" id="sdot"></div>
+          <span id="stext">connecting…</span>
+        </div>
+        <div class="pill" id="modesPill" style="display: none">
+          <span id="modesText" style="color: var(--accent)"></span>
+        </div>
+      </div>
+    </header>
+
+    <div class="layout">
+      <!-- ── Sidebar ── -->
+      <div class="sidebar">
+        <div class="sidebar-body">
+          <div class="sec-label">Prediction Mode</div>
+          <div class="mode-cards">
+            <div
+              class="mode-card active"
+              data-mode="clip_mlp"
+              onclick="selectMode('clip_mlp')"
+            >
+              <div class="radio-dot"></div>
+              <div class="mode-body">
+                <div class="mode-name">CLIP + MLP</div>
+                <div class="mode-desc">
+                  Per-polygon crops → fine-tuned CLIP → MLP classifier.
+                </div>
+              </div>
+              <div class="mode-tag tag-clip">Polygon</div>
+            </div>
+
+            <div
+              class="mode-card"
+              data-mode="rf_detr"
+              onclick="selectMode('rf_detr')"
+            >
+              <div class="radio-dot"></div>
+              <div class="mode-body">
+                <div class="mode-name">RF-DETR</div>
+                <div class="mode-desc">
+                  AOI raster sliced into 200 m grid cells → RF-DETR detects
+                  buildings in each cell.
+                </div>
+              </div>
+              <div class="mode-tag tag-rf">Grid</div>
+            </div>
+
+            <div
+              class="mode-card"
+              data-mode="rf_detr_clip"
+              onclick="selectMode('rf_detr_clip')"
+            >
+              <div class="radio-dot"></div>
+              <div class="mode-body">
+                <div class="mode-name">RF-DETR + CLIP</div>
+                <div class="mode-desc">
+                  RF-DETR locates, CLIP+MLP reclassifies each detected crop.
+                </div>
+              </div>
+              <div class="mode-tag tag-hybrid">Hybrid</div>
+            </div>
+          </div>
+
+          <!-- Controls -->
+          <div class="sec-label">Settings</div>
+          <div class="controls">
+            <div class="ctrl-row">
+              <div class="ctrl-header">
+                <span class="ctrl-label">Tile zoom</span>
+                <span class="ctrl-val val-teal" id="zoomVal">19</span>
+              </div>
+              <input
+                type="range"
+                id="zoomSlider"
+                min="15"
+                max="21"
+                value="19"
+                oninput="
+                  document.getElementById('zoomVal').textContent = this.value
+                "
+              />
+            </div>
+
+            <div class="ctrl-row hidden" id="cellCtrl">
+              <div class="ctrl-header">
+                <span class="ctrl-label">Grid cell size</span>
+                <span class="ctrl-val val-purple"
+                  ><span id="cellVal">200</span> m</span
+                >
+              </div>
+              <input
+                type="range"
+                id="cellSlider"
+                min="50"
+                max="500"
+                step="50"
+                value="200"
+                oninput="
+                  document.getElementById('cellVal').textContent = this.value;
+                  updateGridPreview();
+                "
+              />
+            </div>
+          </div>
+
+          <!-- Info box: RF-DETR grid explanation -->
+          <div class="info-box hidden" id="gridInfo">
+            AOI will be tiled into
+            <span class="info-hl" id="gridCountTxt">—</span> cells of
+            <span class="info-hl" id="gridSizeTxt">200 m</span> ×
+            <span class="info-hl" id="gridSizeTxt2">200 m</span>. Each cell is
+            sent to RF-DETR independently.
+          </div>
+
+          <button
+            class="run-btn"
+            id="runBtn"
+            onclick="runPrediction()"
+            disabled
+          >
+            <span id="runBtnTxt">Draw a polygon first</span>
+          </button>
+
+          <!-- Stats -->
+          <div class="stats-row" id="statsRow" style="display: none">
+            <div class="stat-box">
+              <div class="stat-n" id="sMatched">0</div>
+              <div class="stat-k">Detections</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-n" id="sClassified">0</div>
+              <div class="stat-k">Classified</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-n" id="sTotal">—</div>
+              <div class="stat-k">DB Bldgs</div>
+            </div>
+          </div>
+
+          <!-- Results -->
+          <div class="sec-label" id="resLabel" style="display: none">
+            Results
+          </div>
+          <div class="results-list" id="resultsList">
+            <div class="empty">
+              <div class="empty-ico">🛰️</div>
+              <div class="empty-txt">
+                Draw a polygon on the map<br />then press Run to classify.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Map ── -->
+      <div id="map"></div>
+    </div>
+
+    <div id="toast"></div>
+
+    <script>
+      // ═══════════════════════════════════════════════════════════════════
+      // State
+      // ═══════════════════════════════════════════════════════════════════
+      let selectedMode = 'clip_mlp';
+      let currentPolygon = null;
+      let resultLayers = [];
+      let gridLayers = [];
+
+      const CLASS_COLORS = {
+        Business: '#00e5b4',
+        Immeuble: '#7b61ff',
+        Industrielle: '#ff6b35',
+        Maison: '#ffb800',
+        Villa: '#ff4444',
+      };
+      function clsColor(c) {
+        return CLASS_COLORS[c] || '#5a6475';
+      }
+
+      // ═══════════════════════════════════════════════════════════════════
+      // Map init
+      // ═══════════════════════════════════════════════════════════════════
+      const map = L.map('map', { center: [33.589, -7.603], zoom: 14 });
+
+      L.tileLayer(
+        'https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/{z}/{y}/{x}',
+        {
+          attribution: '©CartoDB',
+          maxZoom: 21,
+        },
+      ).addTo(map);
+
+      const drawnItems = new L.FeatureGroup().addTo(map);
+      const drawCtrl = new L.Control.Draw({
+        edit: { featureGroup: drawnItems },
+        draw: {
+          polygon: {
+            shapeOptions: { color: '#00e5b4', weight: 2, fillOpacity: 0.07 },
+          },
+          rectangle: {
+            shapeOptions: { color: '#00e5b4', weight: 2, fillOpacity: 0.07 },
+          },
+          circle: false,
+          marker: false,
+          polyline: false,
+          circlemarker: false,
+        },
+      }).addTo(map);
+
+      map.on(L.Draw.Event.CREATED, (e) => {
+        drawnItems.clearLayers();
+        drawnItems.addLayer(e.layer);
+        currentPolygon = e.layer.toGeoJSON();
+        enableRun();
+        if (selectedMode !== 'clip_mlp') {
+          drawGridPreview();
+        }
+      });
+
+      map.on(L.Draw.Event.DELETED, () => {
+        currentPolygon = null;
+        clearGridPreview();
+        document.getElementById('runBtn').disabled = true;
+        document.getElementById('runBtnTxt').textContent =
+          'Draw a polygon first';
+        document.getElementById('gridInfo').classList.add('hidden');
+      });
+
+      function enableRun() {
+        document.getElementById('runBtn').disabled = false;
+        document.getElementById('runBtnTxt').textContent = 'Run Prediction';
+      }
+
+      // ═══════════════════════════════════════════════════════════════════
+      // Mode selector
+      // ═══════════════════════════════════════════════════════════════════
+      function selectMode(mode) {
+        selectedMode = mode;
+        document
+          .querySelectorAll('.mode-card')
+          .forEach((c) =>
+            c.classList.toggle('active', c.dataset.mode === mode),
+          );
+
+        const isGrid = mode !== 'clip_mlp';
+        document.getElementById('cellCtrl').classList.toggle('hidden', !isGrid);
+        document
+          .getElementById('gridInfo')
+          .classList.toggle('hidden', !isGrid || !currentPolygon);
+
+        if (isGrid && currentPolygon) {
+          drawGridPreview();
+        } else {
+          clearGridPreview();
+        }
+      }
+
+      // ═══════════════════════════════════════════════════════════════════
+      // Grid preview on map
+      // ═══════════════════════════════════════════════════════════════════
+      function metersToDegreesLat(m) {
+        return m / 111320;
+      }
+      function metersToDegLng(m, lat) {
+        return m / (111320 * Math.cos((lat * Math.PI) / 180));
+      }
+
+      function drawGridPreview() {
+        clearGridPreview();
+        if (!currentPolygon) return;
+
+        const geom = currentPolygon.geometry || currentPolygon;
+        const coords =
+          geom.type === 'Polygon' ? geom.coordinates[0] : geom.coordinates;
+        const lngs = coords.map((c) => c[0]);
+        const lats = coords.map((c) => c[1]);
+        const minx = Math.min(...lngs),
+          maxx = Math.max(...lngs);
+        const miny = Math.min(...lats),
+          maxy = Math.max(...lats);
+
+        const cellM = parseInt(document.getElementById('cellSlider').value);
+        const clat = (miny + maxy) / 2;
+        const dlat = metersToDegreesLat(cellM);
+        const dlng = metersToDegLng(cellM, clat);
+
+        let count = 0;
+        for (let cy = miny; cy < maxy; cy += dlat) {
+          for (let cx = minx; cx < maxx; cx += dlng) {
+            const cell = L.rectangle(
+              [
+                [cy, cx],
+                [Math.min(cy + dlat, maxy), Math.min(cx + dlng, maxx)],
+              ],
+              {
+                color: '#7b61ff',
+                weight: 1,
+                fill: true,
+                fillColor: '#7b61ff',
+                fillOpacity: 0.04,
+                dashArray: '3 3',
+                interactive: false,
+              },
+            ).addTo(map);
+            gridLayers.push(cell);
+            count++;
+          }
+        }
+
+        // Update info box
+        document.getElementById('gridCountTxt').textContent = count;
+        document.getElementById('gridSizeTxt').textContent = cellM;
+        document.getElementById('gridSizeTxt2').textContent = cellM;
+        document.getElementById('gridInfo').classList.remove('hidden');
+      }
+
+      function clearGridPreview() {
+        gridLayers.forEach((l) => map.removeLayer(l));
+        gridLayers = [];
+      }
+
+      function updateGridPreview() {
+        if (currentPolygon && selectedMode !== 'clip_mlp') drawGridPreview();
+      }
+
+      // ═══════════════════════════════════════════════════════════════════
+      // Health check
+      // ═══════════════════════════════════════════════════════════════════
+      async function checkHealth() {
+        try {
+          const d = await fetch('http://localhost:8000/api/health').then((r) =>
+            r.json(),
+          );
+          document.getElementById('sdot').className = 'sdot ok';
+          document.getElementById('stext').textContent =
+            `${(d.buildings_loaded || 0).toLocaleString()} buildings`;
+          if (d.modes_available?.length) {
+            const p = document.getElementById('modesPill');
+            p.style.display = 'flex';
+            document.getElementById('modesText').textContent =
+              d.modes_available.join(' · ');
+          }
+        } catch {
+          document.getElementById('sdot').className = 'sdot err';
+          document.getElementById('stext').textContent = 'server unreachable';
+        }
+      }
+      checkHealth();
+
+      // ═══════════════════════════════════════════════════════════════════
+      // Toast
+      // ═══════════════════════════════════════════════════════════════════
+      function toast(msg, type = 'ok', ms = 3200) {
+        const t = document.getElementById('toast');
+        t.textContent = msg;
+        t.className = `show ${type}`;
+        clearTimeout(t._t);
+        t._t = setTimeout(() => (t.className = ''), ms);
+      }
+
+      // ═══════════════════════════════════════════════════════════════════
+      // Run
+      // ═══════════════════════════════════════════════════════════════════
+      async function runPrediction() {
+        if (!currentPolygon) return;
+
+        const btn = document.getElementById('runBtn');
+        const zoom = parseInt(document.getElementById('zoomSlider').value);
+        const cellM = parseInt(document.getElementById('cellSlider').value);
+
+        btn.classList.add('loading');
+        btn.disabled = true;
+        document.getElementById('runBtnTxt').textContent = 'Processing…';
+
+        // Clear old result layers
+        resultLayers.forEach((l) => map.removeLayer(l));
+        resultLayers = [];
+
+        if (selectedMode !== 'clip_mlp') {
+          toast(
+            `Downloading AOI raster & slicing into ${cellM} m cells…`,
+            'info',
+            8000,
+          );
+        }
+
+        try {
+          const payload = {
+            area: currentPolygon,
+            zoom,
+            mode: selectedMode,
+            cell_meters: cellM,
+          };
+          const res = await fetch('http://localhost:8000/api/process', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || `HTTP ${res.status}`);
+          }
+
+          const data = await res.json();
+          renderResults(data);
+          toast(`✓ ${data.meta.classified} buildings classified`, 'ok');
+        } catch (e) {
+          toast(`Error: ${e.message}`, 'err', 6000);
+        } finally {
+          btn.classList.remove('loading');
+          btn.disabled = false;
+          document.getElementById('runBtnTxt').textContent = 'Run Prediction';
+        }
+      }
+
+      // ═══════════════════════════════════════════════════════════════════
+      // Point-in-polygon check (ray casting algorithm)
+      // ═══════════════════════════════════════════════════════════════════
+      function pointInPolygon(point, polygon) {
+        const [px, py] = point;
+        const coords =
+          polygon.type === 'Polygon'
+            ? polygon.coordinates[0]
+            : polygon.coordinates;
+        let inside = false;
+        for (let i = 0, j = coords.length - 1; i < coords.length; j = i++) {
+          const [xi, yi] = coords[i];
+          const [xj, yj] = coords[j];
+          const intersect =
+            yi > py !== yj > py &&
+            px < ((xj - xi) * (py - yi)) / (yj - yi) + xi;
+          if (intersect) inside = !inside;
+        }
+        return inside;
+      }
+
+      function featureInsidePolygon(feature, polygon) {
+        const geom = feature.geometry;
+        if (!geom) return false;
+
+        let testPoint;
+        if (geom.type === 'Point') {
+          testPoint = geom.coordinates;
+        } else if (geom.type === 'Polygon' || geom.type === 'MultiPolygon') {
+          // Get centroid by averaging coordinates
+          let allCoords = [];
+          if (geom.type === 'Polygon') {
+            allCoords = geom.coordinates[0];
+          } else {
+            geom.coordinates.forEach((poly) => allCoords.push(...poly[0]));
+          }
+          const avgLng =
+            allCoords.reduce((sum, c) => sum + c[0], 0) / allCoords.length;
+          const avgLat =
+            allCoords.reduce((sum, c) => sum + c[1], 0) / allCoords.length;
+          testPoint = [avgLng, avgLat];
+        }
+
+        return testPoint ? pointInPolygon(testPoint, polygon) : false;
+      }
+
+      // Calculate polygon area in square meters
+      function calculatePolygonArea(polygon) {
+        const coords =
+          polygon.type === 'Polygon'
+            ? polygon.coordinates[0]
+            : polygon.coordinates;
+        let area = 0;
+        for (let i = 0, j = coords.length - 1; i < coords.length; j = i++) {
+          const [x1, y1] = coords[i];
+          const [x2, y2] = coords[j];
+          area += x1 * y2 - x2 * y1;
+        }
+        area = Math.abs(area) / 2;
+        // Convert from degrees² to approximate square meters (rough conversion at equator)
+        const metersPerDegree = 111320;
+        return area * metersPerDegree * metersPerDegree;
+      }
+
+      // Calculate feature area in square meters
+      function calculateFeatureArea(feature) {
+        const geom = feature.geometry;
+        if (!geom) return 0;
+
+        if (geom.type === 'Polygon') {
+          const coords = geom.coordinates[0];
+          let area = 0;
+          for (let i = 0, j = coords.length - 1; i < coords.length; j = i++) {
+            const [x1, y1] = coords[i];
+            const [x2, y2] = coords[j];
+            area += x1 * y2 - x2 * y1;
+          }
+          area = Math.abs(area) / 2;
+          const metersPerDegree = 111320;
+          return area * metersPerDegree * metersPerDegree;
+        } else if (geom.type === 'MultiPolygon') {
+          return geom.coordinates.reduce((sum, poly) => {
+            let area = 0;
+            const coords = poly[0];
+            for (let i = 0, j = coords.length - 1; i < coords.length; j = i++) {
+              const [x1, y1] = coords[i];
+              const [x2, y2] = coords[j];
+              area += x1 * y2 - x2 * y1;
+            }
+            area = Math.abs(area) / 2;
+            const metersPerDegree = 111320;
+            return sum + area * metersPerDegree * metersPerDegree;
+          }, 0);
+        }
+        return 0;
+      }
+
+      // ═══════════════════════════════════════════════════════════════════
+      // Render results
+      // ═══════════════════════════════════════════════════════════════════
+      function renderResults(data) {
+        const { features, meta } = data;
+
+        // Filter features that are inside the current polygon
+        const polygonGeom = currentPolygon.geometry || currentPolygon;
+        const filteredFeatures = features.filter((f) =>
+          featureInsidePolygon(f, polygonGeom),
+        );
+
+        document.getElementById('statsRow').style.display = 'grid';
+        document.getElementById('sMatched').textContent = meta.matched;
+        document.getElementById('sClassified').textContent = meta.classified;
+        document.getElementById('sTotal').textContent =
+          meta.total_buildings || '—';
+        document.getElementById('resLabel').style.display = 'block';
+
+        const list = document.getElementById('resultsList');
+        list.innerHTML = '';
+
+        if (!filteredFeatures.length) {
+          list.innerHTML =
+            '<div class="empty"><div class="empty-txt">No buildings found inside the polygon.</div></div>';
+          return;
+        }
+
+        // Group features by class and calculate stats
+        const classSummary = {};
+        const polygonArea = calculatePolygonArea(polygonGeom);
+
+        filteredFeatures.forEach((f) => {
+          const cls = f.properties._class || 'unknown';
+          const area = calculateFeatureArea(f);
+
+          if (!classSummary[cls]) {
+            classSummary[cls] = {
+              count: 0,
+              totalArea: 0,
+              features: [],
+              color: clsColor(cls),
+            };
+          }
+          classSummary[cls].count++;
+          classSummary[cls].totalArea += area;
+          classSummary[cls].features.push(f);
+        });
+
+        // Add all features to map
+        filteredFeatures.forEach((f) => {
+          const p = f.properties;
+          const cls = p._class || 'unknown';
+          const col = clsColor(cls);
+          const conf = p._confidence || 0;
+          const dets = p._detections || [];
+          const name =
+            p.name ||
+            p.id ||
+            `Detection ${(p._det_idx ?? p._source_idx ?? 0) + 1}`;
+          const mode = p._mode || selectedMode;
+
+          // Map layer
+          const layer = L.geoJSON(f, {
+            style: {
+              color: col,
+              weight: 1.5,
+              fillColor: col,
+              fillOpacity: 0.15,
+            },
+          }).bindPopup(() => makePopup(p, name, cls, conf, dets, mode), {
+            maxWidth: 270,
+          });
+          layer.addTo(map);
+          resultLayers.push(layer);
+        });
+
+        // Create summary cards per class
+        Object.keys(classSummary)
+          .sort()
+          .forEach((cls) => {
+            const summary = classSummary[cls];
+            const density = ((summary.totalArea / polygonArea) * 100).toFixed(
+              2,
+            );
+            const clsCls = 'cls-' + cls.replace(/\s+/g, '_');
+
+            const item = document.createElement('div');
+            item.className = 'r-item';
+
+            item.innerHTML = `
+      <div class="r-top">
+        <div class="r-name">${cls}</div>
+        <span class="r-badge ${clsCls}">${summary.count}</span>
+      </div>
+      <div class="r-bar"><div class="r-fill" style="width:${Math.min(density, 100)}%;background:${summary.color}"></div></div>
+      <div style="font-family: 'DM Mono', monospace; font-size: 10px; color: var(--muted); margin-top: 5px; text-align: right;">
+        Density: ${density}%
+      </div>
+    `;
+
+            item.addEventListener('click', () => {
+              document
+                .querySelectorAll('.r-item')
+                .forEach((x) => x.classList.remove('selected'));
+              item.classList.add('selected');
+              // Fit bounds to all features of this class
+              try {
+                const featureGroup = L.featureGroup(
+                  resultLayers.filter((l) => {
+                    const lyrGeoJSON = l.toGeoJSON();
+                    return (lyrGeoJSON.properties._class || 'unknown') === cls;
+                  }),
+                );
+                map.fitBounds(featureGroup.getBounds(), {
+                  maxZoom: 19,
+                  padding: [50, 50],
+                });
+              } catch {}
+            });
+
+            list.appendChild(item);
+          });
+      }
+
+      function makePopup(p, name, cls, conf, dets, mode) {
+        const col = clsColor(cls);
+        const pct = Math.round(conf * 100);
+        const modeLabel =
+          {
+            clip_mlp: 'CLIP + MLP',
+            rf_detr: 'RF-DETR (grid)',
+            rf_detr_clip: 'RF-DETR + CLIP',
+          }[mode] || mode;
+
+        const clsCls = 'cls-' + cls.replace(/\s+/g, '_');
+
+        let detHTML = '';
+        if (dets.length) {
+          detHTML = `<div class="pu-dets">
+      <div style="font-size:9.5px;color:var(--muted);letter-spacing:.8px;text-transform:uppercase;margin-bottom:5px">
+        Detections (${dets.length})</div>
+      ${dets
+        .map((d) => {
+          const dc = Math.round((d.confidence || 0) * 100);
+          const clip = d.clip_class
+            ? `<span style="color:var(--hybrid-color)">${d.clip_class} ${Math.round((d.clip_confidence || 0) * 100)}%</span>`
+            : '';
+          return `<div class="pu-det-row">
+          <span style="color:var(--rf-color)">${d.class} ${dc}%</span>${clip}
+        </div>`;
+        })
+        .join('')}
+    </div>`;
+        }
+
+        return `<div>
+    <div class="pu-head">${name}</div>
+    <div class="pu-row">Mode <span class="pu-val">${modeLabel}</span></div>
+    <div class="pu-row">Class
+      <span class="pu-val r-badge ${clsCls}" style="padding:2px 8px;border-radius:4px">${cls}</span>
+    </div>
+    <div class="pu-row">Confidence
+      <span class="pu-val" style="color:${col}">${pct}%</span>
+    </div>
+    ${
+      p._rf_class && p._rf_class !== cls
+        ? `<div class="pu-row">RF-DETR label
+          <span class="pu-val" style="color:var(--rf-color)">${p._rf_class} (${Math.round((p._rf_confidence || 0) * 100)}%)</span>
+        </div>`
+        : ''
+    }
+    ${detHTML}
+  </div>`;
+      }
+    </script>
+  </body>
+</html>

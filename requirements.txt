@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+pillow
+requests
+shapely
+joblib
+scikit-learn
+numpy
+torch
+torchvision
+tensorflow
+transformers
+xgboost

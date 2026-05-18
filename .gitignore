@@ -146,11 +146,17 @@ activemq-data/
 
 # SageMath parsed files
 *.sage.py
-
+#custom
+clip_mlp_checkpoints/
+clip_mlp_checkpoints_97/
+clip_mlp_checkpoints_old/
+clip_mlp_building_400.zip
+buildings_casablanca.geojson
+buildings.geojson
 # Environments
 .env
 .envrc
-.venv
+.venv/
 env/
 venv/
 ENV/

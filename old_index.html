@@ -1,0 +1,903 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Building BBox Extractor</title>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"
+    />
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Syne:wght@400;600;800&display=swap');
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      :root {
+        --bg: #080b0f;
+        --panel: #0e1117;
+        --panel2: #13171f;
+        --border: #1c2130;
+        --accent: #00e5ff;
+        --accent2: #ff6b35;
+        --accent3: #7fff6e;
+        --text: #dde2ee;
+        --muted: #48536a;
+        --warn: #ffd166;
+      }
+
+      body {
+        font-family: 'JetBrains Mono', monospace;
+        background: var(--bg);
+        color: var(--text);
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      /* ── Header ── */
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 18px;
+        background: var(--panel);
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+        z-index: 1000;
+      }
+      .logo {
+        font-family: 'Syne', sans-serif;
+        font-weight: 800;
+        font-size: 17px;
+        letter-spacing: -0.5px;
+        color: var(--accent);
+      }
+      .logo span {
+        color: var(--text);
+      }
+      .header-stats {
+        display: flex;
+        gap: 20px;
+      }
+      .hstat {
+        font-size: 9px;
+        color: var(--muted);
+        line-height: 1.3;
+      }
+      .hstat b {
+        display: block;
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--accent);
+        letter-spacing: -0.5px;
+      }
+
+      /* ── Layout ── */
+      .main {
+        display: flex;
+        flex: 1;
+        overflow: hidden;
+      }
+      #map {
+        flex: 1;
+        background: #0a0e14;
+      }
+
+      /* ── Sidebar ── */
+      .sidebar {
+        width: 310px;
+        background: var(--panel);
+        border-left: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        flex-shrink: 0;
+      }
+      .sb-section {
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--border);
+        font-size: 9px;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      /* ── Stats strip ── */
+      .stats-strip {
+        display: flex;
+        border-bottom: 1px solid var(--border);
+      }
+      .stat-cell {
+        flex: 1;
+        padding: 8px 10px;
+        border-right: 1px solid var(--border);
+        font-size: 9px;
+        color: var(--muted);
+        line-height: 1.4;
+      }
+      .stat-cell:last-child {
+        border-right: none;
+      }
+      .stat-cell b {
+        display: block;
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--accent);
+        letter-spacing: -0.3px;
+      }
+
+      /* ── Server config ── */
+      .server-row {
+        display: flex;
+        gap: 6px;
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--border);
+        align-items: center;
+      }
+      .server-row input {
+        flex: 1;
+        background: var(--panel2);
+        border: 1px solid var(--border);
+        color: var(--text);
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11px;
+        padding: 7px 10px;
+        border-radius: 3px;
+        outline: none;
+      }
+      .server-row input:focus {
+        border-color: var(--accent);
+      }
+      .pill {
+        padding: 3px 8px;
+        border-radius: 20px;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        border: 1px solid var(--muted);
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .pill.ok {
+        border-color: var(--accent3);
+        color: var(--accent3);
+        background: rgba(127, 255, 110, 0.07);
+      }
+      .pill.err {
+        border-color: #ff4444;
+        color: #ff4444;
+        background: rgba(255, 68, 68, 0.07);
+      }
+      .pill.checking {
+        border-color: var(--warn);
+        color: var(--warn);
+        animation: blink 1s infinite;
+      }
+
+      /* ── Controls ── */
+      .controls {
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .btn {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 9px 12px;
+        border: 1px solid var(--border);
+        background: transparent;
+        color: var(--text);
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11px;
+        cursor: pointer;
+        transition: all 0.15s;
+        border-radius: 3px;
+        width: 100%;
+        text-align: left;
+      }
+      .btn:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .btn.primary {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: rgba(0, 229, 255, 0.04);
+      }
+      .btn.primary:hover {
+        background: rgba(0, 229, 255, 0.1);
+      }
+      .btn.go {
+        border-color: var(--accent3);
+        color: var(--accent3);
+        background: rgba(127, 255, 110, 0.04);
+      }
+      .btn.go:hover {
+        background: rgba(127, 255, 110, 0.1);
+      }
+      .btn.danger {
+        border-color: #ff4444;
+        color: #ff4444;
+      }
+      .btn.danger:hover {
+        background: rgba(255, 68, 68, 0.07);
+      }
+      .btn:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+        pointer-events: none;
+      }
+      .btn .icon {
+        font-size: 13px;
+      }
+
+      /* ── Zoom row ── */
+      .zoom-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--border);
+        font-size: 10px;
+        color: var(--muted);
+      }
+      .zoom-row input[type='range'] {
+        flex: 1;
+        accent-color: var(--accent);
+      }
+      .zoom-val {
+        color: var(--accent);
+        font-weight: 700;
+        min-width: 20px;
+        text-align: right;
+      }
+
+      /* ── Results ── */
+      .results {
+        flex: 1;
+        overflow-y: auto;
+        padding: 10px;
+      }
+      .results::-webkit-scrollbar {
+        width: 3px;
+      }
+      .results::-webkit-scrollbar-thumb {
+        background: var(--border);
+        border-radius: 2px;
+      }
+
+      .empty-state {
+        text-align: center;
+        padding: 40px 16px;
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.9;
+      }
+      .es-icon {
+        font-size: 30px;
+        margin-bottom: 10px;
+        opacity: 0.25;
+      }
+
+      .building-card {
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        margin-bottom: 8px;
+        overflow: hidden;
+        cursor: pointer;
+        transition: all 0.15s;
+        animation: slideIn 0.2s ease;
+      }
+      .building-card:hover {
+        border-color: var(--accent2);
+      }
+      .card-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 10px;
+        gap: 8px;
+      }
+      .card-name {
+        font-size: 11px;
+        color: var(--text);
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .card-bbox {
+        font-size: 9px;
+        color: var(--muted);
+        padding: 0 10px 8px;
+        line-height: 1.8;
+        font-family: 'JetBrains Mono', monospace;
+      }
+      .card-thumb {
+        width: 100%;
+        max-height: 120px;
+        object-fit: cover;
+        border-top: 1px solid var(--border);
+        display: block;
+        background: #0a0e14;
+      }
+      .card-thumb-placeholder {
+        height: 60px;
+        background: var(--panel2);
+        border-top: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        color: var(--muted);
+      }
+      .badge {
+        padding: 2px 6px;
+        border-radius: 2px;
+        font-size: 8px;
+        font-weight: 700;
+        letter-spacing: 0.8px;
+        text-transform: uppercase;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .badge.ok {
+        background: rgba(127, 255, 110, 0.1);
+        color: var(--accent3);
+      }
+      .badge.fail {
+        background: rgba(255, 68, 68, 0.1);
+        color: #ff6666;
+      }
+
+      /* ── Status ── */
+      .status-bar {
+        padding: 7px 14px;
+        background: rgba(0, 0, 0, 0.4);
+        border-top: 1px solid var(--border);
+        font-size: 9px;
+        color: var(--muted);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+      .sdot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--muted);
+        flex-shrink: 0;
+      }
+      .sdot.on {
+        background: var(--accent3);
+        box-shadow: 0 0 6px var(--accent3);
+      }
+      .sdot.busy {
+        background: var(--warn);
+        box-shadow: 0 0 6px var(--warn);
+        animation: blink 0.8s infinite;
+      }
+      .sdot.err {
+        background: #ff4444;
+        box-shadow: 0 0 6px #ff4444;
+      }
+
+      /* ── Progress bar ── */
+      .progress-wrap {
+        height: 2px;
+        background: var(--border);
+        flex-shrink: 0;
+        overflow: hidden;
+      }
+      .progress-bar {
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, var(--accent), var(--accent3));
+        transition: width 0.3s ease;
+      }
+
+      /* ── Leaflet ── */
+      .leaflet-control-zoom a {
+        background: var(--panel) !important;
+        color: var(--text) !important;
+        border-color: var(--border) !important;
+      }
+      .leaflet-bar {
+        border: 1px solid var(--border) !important;
+        box-shadow: none !important;
+      }
+      .leaflet-draw-toolbar a {
+        background-color: var(--panel) !important;
+        border-color: var(--border) !important;
+      }
+      .leaflet-draw-actions a {
+        background: var(--panel) !important;
+      }
+      .leaflet-tooltip {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        color: var(--text);
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        border-radius: 3px;
+      }
+      .leaflet-tooltip::before {
+        display: none;
+      }
+
+      @keyframes slideIn {
+        from {
+          opacity: 0;
+          transform: translateY(6px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      @keyframes blink {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.3;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="progress-wrap">
+      <div class="progress-bar" id="progress"></div>
+    </div>
+
+    <div class="main">
+      <div id="map"></div>
+
+      <div class="sidebar">
+        <div class="sb-section">Server</div>
+
+        <div class="server-row">
+          <input
+            type="text"
+            id="server-url"
+            value="http://localhost:8000"
+            placeholder="http://localhost:8000"
+          />
+          <span class="pill" id="server-pill">—</span>
+        </div>
+
+        <!-- ✅ FIX: stat elements that JS was referencing but didn't exist in HTML -->
+        <div class="stats-strip">
+          <div class="stat-cell">
+            <b id="stat-total">—</b>
+            total bldgs
+          </div>
+          <div class="stat-cell">
+            <b id="stat-matched">—</b>
+            matched
+          </div>
+          <div class="stat-cell">
+            <b id="stat-crops">—</b>
+            crops
+          </div>
+        </div>
+
+        <div class="sb-section">Controls</div>
+        <div class="controls">
+          <button class="btn primary" id="btn-draw" onclick="startDrawing()">
+            <span class="icon">✏️</span> Draw Area of Interest
+          </button>
+          <button
+            class="btn go"
+            id="btn-process"
+            onclick="processArea()"
+            disabled
+          >
+            <span class="icon">⚡</span> Process &amp; Generate Crops
+          </button>
+          <button
+            class="btn"
+            id="btn-clear-draw"
+            onclick="clearDrawing()"
+            style="display: none"
+          >
+            <span class="icon">↩️</span> Clear Drawing
+          </button>
+          <button class="btn danger" onclick="resetAll()">
+            <span class="icon">⚠️</span> Reset All
+          </button>
+        </div>
+
+        <div class="zoom-row">
+          <span>Zoom</span>
+          <input
+            type="range"
+            id="zoom-slider"
+            min="17"
+            max="21"
+            value="19"
+            oninput="
+              document.getElementById('zoom-val').textContent = this.value
+            "
+          />
+          <span class="zoom-val" id="zoom-val">19</span>
+        </div>
+
+        <div
+          class="sb-section"
+          style="display: flex; justify-content: space-between"
+        >
+          <span>Results</span>
+          <span id="result-tag" style="display: none; color: var(--accent3)"
+            >0 bboxes</span
+          >
+        </div>
+
+        <div class="results" id="results">
+          <div class="empty-state">
+            <div class="es-icon">🏙️</div>
+            Draw an area of interest<br />and hit <em>Process</em> to send it<br />to
+            the server.
+          </div>
+        </div>
+
+        <div class="status-bar">
+          <div class="sdot" id="sdot"></div>
+          <span id="status-text">Ready — draw an area to begin</span>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+    <script>
+      // ── State ─────────────────────────────────────────────────────────────────
+      let drawnArea = null;
+      let bboxLayers = [];
+      let drawControl = null;
+      let areaLayer = null;
+      let classColors = {};
+
+      // ── Safe stat setter (guards against missing elements) ────────────────────
+      function setStat(id, value) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
+      }
+
+      // ── Class color generator ─────────────────────────────────────────────────
+      function generateClassColors(classes) {
+        const classColorMap = {
+          residential: '#00D9FF',
+          industrial: '#FF4757',
+          villa: '#2ED573',
+          commercial: '#FFD93D',
+          apartments: '#A29BFE',
+          hospital: '#FF7F50',
+          school: '#6C5CE7',
+          office: '#00CEC9',
+        };
+        const colors = ['#OOFFOO', '#FFFF00', '#FF0000'];
+        classColors = {};
+        classes.forEach((cls, idx) => {
+          classColors[cls] = classColorMap[cls] || colors[idx % colors.length];
+        });
+      }
+
+      // ── Map ───────────────────────────────────────────────────────────────────
+      const map = L.map('map').setView([33.5299239, -7.6492092], 16);
+
+      L.tileLayer(
+        'https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/{z}/{y}/{x}',
+        { maxZoom: 19 },
+      ).addTo(map);
+
+      const drawnItems = new L.FeatureGroup().addTo(map);
+
+      // ── Draw Control ──────────────────────────────────────────────────────────
+      function initDraw() {
+        if (drawControl) map.removeControl(drawControl);
+        drawControl = new L.Control.Draw({
+          draw: {
+            polygon: {
+              shapeOptions: { color: '#00e5ff', weight: 2, fillOpacity: 0.06 },
+            },
+            rectangle: {
+              shapeOptions: { color: '#00e5ff', weight: 2, fillOpacity: 0.06 },
+            },
+            polyline: false,
+            circle: false,
+            circlemarker: false,
+            marker: false,
+          },
+          edit: { featureGroup: drawnItems },
+        });
+        map.addControl(drawControl);
+      }
+      initDraw();
+
+      function startDrawing() {
+        new L.Draw.Polygon(map).enable();
+      }
+
+      map.on(L.Draw.Event.CREATED, (e) => {
+        drawnItems.clearLayers();
+        drawnArea = e.layer;
+        drawnItems.addLayer(drawnArea);
+        document.getElementById('btn-draw').style.display = 'none';
+        document.getElementById('btn-clear-draw').style.display = '';
+        document.getElementById('btn-process').disabled = false;
+        setStatus('on', 'Area drawn — click Process to send to server');
+      });
+
+      map.on(L.Draw.Event.DRAWSTART, () =>
+        setStatus('busy', 'Drawing polygon…'),
+      );
+
+      // ── Server health ─────────────────────────────────────────────────────────
+      let healthTimer = null;
+      function checkHealth() {
+        const base = serverBase();
+        const pill = document.getElementById('server-pill');
+        pill.className = 'pill checking';
+        pill.textContent = '…';
+        fetch(`${base}/api/health`, { signal: AbortSignal.timeout(3000) })
+          .then((r) => r.json())
+          .then((d) => {
+            pill.className = 'pill ok';
+            pill.textContent = `✓ ${d.buildings_loaded ?? '?'} bldgs`;
+            setStat('stat-total', d.buildings_loaded ?? '—'); // ✅ safe call
+          })
+          .catch(() => {
+            pill.className = 'pill err';
+            pill.textContent = '✗ offline';
+          });
+      }
+
+      document.getElementById('server-url').addEventListener('input', () => {
+        clearTimeout(healthTimer);
+        healthTimer = setTimeout(checkHealth, 600);
+      });
+      checkHealth();
+
+      function serverBase() {
+        return document.getElementById('server-url').value.replace(/\/$/, '');
+      }
+
+      // ── Process ───────────────────────────────────────────────────────────────
+      async function processArea() {
+        if (!drawnArea) return;
+        setProgress(10);
+        setStatus('busy', 'Sending area to server…');
+        document.getElementById('btn-process').disabled = true;
+
+        clearBBoxes();
+
+        const areaGeoJSON = drawnArea.toGeoJSON();
+        const zoom = parseInt(document.getElementById('zoom-slider').value);
+
+        let data;
+        try {
+          setProgress(25);
+          const res = await fetch(`${serverBase()}/api/process`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ area: areaGeoJSON, zoom }),
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          data = await res.json();
+        } catch (e) {
+          setProgress(0);
+          setStatus('err', `Server error: ${e.message}`);
+          document.getElementById('btn-process').disabled = false;
+          return;
+        }
+
+        setProgress(70);
+        const meta = data.meta || {};
+        if (meta.classes) {
+          generateClassColors(meta.classes);
+        }
+
+        setStatus('busy', `Drawing ${data.features.length} bounding boxes…`);
+
+        // ✅ FIX: use setStat() so missing elements never crash execution
+        setStat('stat-matched', meta.matched ?? data.features.length);
+        setStat('stat-crops', meta.saved_crops ?? '—');
+
+        const tag = document.getElementById('result-tag');
+        tag.textContent = `${data.features.length} bboxes`;
+        tag.style.display = '';
+
+        // ✅ FIX: wrapped in try/catch so a bad feature can't stall the whole loop
+        data.features.forEach((f, i) => {
+          try {
+            const [minx, miny, maxx, maxy] = f.bbox;
+            const props = f.properties || {};
+            const predClass = props._class || props.class;
+            const color =
+              predClass && classColors[predClass]
+                ? classColors[predClass]
+                : '#ff6b35';
+
+            const rect = L.rectangle(
+              [
+                [miny, minx],
+                [maxy, maxx],
+              ],
+              {
+                color: color,
+                weight: 2,
+                fillColor: color,
+                fillOpacity: 0.15,
+                dashArray: '4 2',
+              },
+            ).addTo(map);
+
+            const name =
+              props.name || props.id || `Building ${props._source_idx ?? i}`;
+            const classStr = predClass ? ` [${predClass}]` : '';
+            const confidence = props._confidence
+              ? `<br>Confidence: ${(props._confidence * 100).toFixed(1)}%`
+              : '';
+            rect.bindTooltip(
+              `${name}${classStr}${confidence}<br><small>padded 4 m</small>`,
+              { sticky: true },
+            );
+            rect.on('click', () => scrollToCard(i));
+            bboxLayers.push(rect);
+          } catch (err) {
+            console.warn(`Skipped feature ${i}:`, err);
+          }
+        });
+
+        renderSidebar(data.features);
+        setProgress(100);
+        setTimeout(() => setProgress(0), 600);
+        setStatus(
+          'on',
+          `Done — ${data.features.length} buildings, ${meta.saved_crops ?? 0} crops classified`,
+        );
+        document.getElementById('btn-process').disabled = false;
+
+        if (bboxLayers.length > 0) {
+          const all = bboxLayers.map((l) => l.getBounds());
+          const combined = all.reduce((acc, b) => acc.extend(b), all[0]);
+          map.fitBounds(combined, { padding: [30, 30] });
+        }
+      }
+
+      // ── Sidebar ───────────────────────────────────────────────────────────────
+      function renderSidebar(features) {
+        const container = document.getElementById('results');
+        if (!features.length) {
+          container.innerHTML = `<div class="empty-state"><div class="es-icon">🔍</div>No buildings found<br>in the selected area.</div>`;
+          return;
+        }
+
+        container.innerHTML = '';
+        const base = serverBase();
+
+        features.forEach((f, i) => {
+          const props = f.properties || {};
+          const name =
+            props.name || props.id || `Building ${props._source_idx ?? i}`;
+          // const bbox = f.bbox || props._bbox_padded || [];
+          const bbox = f.bbox || props._bbox || [];
+          const crop = props._crop_file;
+          const predClass = props._class;
+          const predConf = props._confidence || 0;
+          const hasCrop = !!crop;
+
+          const card = document.createElement('div');
+          card.className = 'building-card';
+          card.id = `card-${i}`;
+
+          const classColor =
+            predClass && classColors[predClass]
+              ? classColors[predClass]
+              : '#888';
+          const classHtml = predClass
+            ? `<div style="padding: 8px 10px; background: ${classColor}20; border-top: 2px solid ${classColor}; color: ${classColor}; font-size: 11px; font-weight: 700; display: flex; align-items: center; gap: 6px;"><span style="color: ${classColor}; font-size: 16px;">●</span> ${predClass} <span style="font-weight: 400; opacity: 0.8;">(${(predConf * 100).toFixed(1)}%)</span></div>`
+            : '';
+
+          card.innerHTML = `
+            <div class="card-header">
+              <div class="card-name">▪ ${name}</div>
+              <span class="badge ${hasCrop ? 'ok' : 'fail'}">${hasCrop ? '✓ saved' : '✗ no crop'}</span>
+            </div>
+            <div class="card-bbox">
+              W ${bbox[0]?.toFixed(6) ?? '—'}  S ${bbox[1]?.toFixed(6) ?? '—'}<br>
+              E ${bbox[2]?.toFixed(6) ?? '—'}  N ${bbox[3]?.toFixed(6) ?? '—'}
+            </div>
+            ${classHtml}
+            ${
+              hasCrop
+                ? `<img class="card-thumb" src="${base}/crops/${crop}" alt="crop" loading="lazy" onerror="this.style.display='none'">`
+                : `<div class="card-thumb-placeholder">no crop generated</div>`
+            }
+          `;
+
+          card.addEventListener('click', () => {
+            const layer = bboxLayers[i];
+            if (!layer) return;
+            map.fitBounds(layer.getBounds(), {
+              padding: [50, 50],
+              maxZoom: 20,
+            });
+            const color = layer.options.color;
+            layer.setStyle({ color: '#ffd166', weight: 2.5 });
+            setTimeout(
+              () => layer.setStyle({ color: color, weight: 1.5 }),
+              1200,
+            );
+          });
+
+          container.appendChild(card);
+        });
+      }
+
+      function scrollToCard(i) {
+        const card = document.getElementById(`card-${i}`);
+        if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+
+      // ── Helpers ───────────────────────────────────────────────────────────────
+      function clearBBoxes() {
+        bboxLayers.forEach((l) => map.removeLayer(l));
+        bboxLayers = [];
+      }
+
+      function clearDrawing() {
+        drawnItems.clearLayers();
+        drawnArea = null;
+        clearBBoxes();
+        document.getElementById('btn-draw').style.display = '';
+        document.getElementById('btn-clear-draw').style.display = 'none';
+        document.getElementById('btn-process').disabled = true;
+        document.getElementById('result-tag').style.display = 'none';
+        setStat('stat-matched', '—');
+        setStat('stat-crops', '—');
+        document.getElementById('results').innerHTML =
+          `<div class="empty-state"><div class="es-icon">✏️</div>Draw a new area<br>to get started.</div>`;
+        setStatus('', 'Drawing cleared');
+      }
+
+      function resetAll() {
+        clearDrawing();
+        setStat('stat-total', '—');
+        setStatus('', 'Reset — draw an area to begin');
+        checkHealth();
+      }
+
+      function setStatus(type, text) {
+        const dot = document.getElementById('sdot');
+        dot.className = 'sdot' + (type ? ` ${type}` : '');
+        document.getElementById('status-text').textContent = text;
+      }
+
+      function setProgress(pct) {
+        document.getElementById('progress').style.width = pct + '%';
+      }
+    </script>
+  </body>
+</html>
