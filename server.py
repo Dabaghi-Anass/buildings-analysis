@@ -36,6 +36,7 @@ import json
 import math
 import os
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
@@ -73,7 +74,7 @@ print(f"[INFO] HF token: {'yes' if token else 'no'}")
 print(f"[INFO] Roboflow SDK available: {ROBOFLOW_AVAILABLE}")
 
 # ── Config ────────────────────────────────────────────────────────────────────
-BUILDINGS_PATH  = "buildings_casablanca.geojson"
+BUILDINGS_PATH  = "buildings.geojson"
 SAVE_DIR        = Path("clip_mlp_checkpoints_97")
 CLIP_CKPT       = SAVE_DIR / "clip_finetuned.pt"
 MLP_CKPT        = SAVE_DIR / "mlp_head.pt"
@@ -285,10 +286,12 @@ def pixel_to_geo(
 # AOI full-raster downloader
 # ══════════════════════════════════════════════════════════════════════════════
 def download_aoi_raster(
-    minx: float, miny: float, maxx: float, maxy: float, zoom: int
+    minx: float, miny: float, maxx: float, maxy: float, zoom: int,
+    max_workers: int = 8
 ) -> tuple[Image.Image, int, int] | None:
     """
     Stitch all zoom-level tiles covering the bounding box into one canvas.
+    Fetches tiles in parallel using multithreading for speed.
     Returns (canvas_image, tx_min, ty_min) or None on failure.
     """
     tx_min, ty_min = lng_lat_to_tile(minx, maxy, zoom)   # NW corner
@@ -305,17 +308,60 @@ def download_aoi_raster(
     print(f"[INFO] Downloading AOI raster: {w_tiles}×{h_tiles} tiles ({total} total)…")
     canvas = Image.new("RGB", (w_tiles * TILE_SIZE, h_tiles * TILE_SIZE))
 
+    # Collect all tile coordinates
+    tile_coords: list[tuple[int, int, int, int]] = []
     for ty in range(ty_min, ty_max + 1):
         for tx in range(tx_min, tx_max + 1):
-            tile = fetch_tile(tx, ty, zoom)
+            tile_coords.append((tx, ty, zoom, tx - tx_min))
+
+    # Fetch tiles in parallel
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Create a mapping of future → (offset_x, offset_y)
+        future_to_offset = {
+            executor.submit(fetch_tile, tx, ty, z): (ox * TILE_SIZE, (ty - ty_min) * TILE_SIZE)
+            for tx, ty, z, ox in tile_coords
+        }
+        
+        for future in as_completed(future_to_offset):
+            tile = future.result()
             if tile:
-                canvas.paste(
-                    tile,
-                    ((tx - tx_min) * TILE_SIZE, (ty - ty_min) * TILE_SIZE)
-                )
+                offset_x, offset_y = future_to_offset[future]
+                canvas.paste(tile, (offset_x, offset_y))
 
     return canvas, tx_min, ty_min
 
+
+# def download_aoi_raster(
+#     minx: float, miny: float, maxx: float, maxy: float, zoom: int
+# ) -> tuple[Image.Image, int, int] | None:
+#     """
+#     Stitch all zoom-level tiles covering the bounding box into one canvas.
+#     Returns (canvas_image, tx_min, ty_min) or None on failure.
+#     """
+#     tx_min, ty_min = lng_lat_to_tile(minx, maxy, zoom)   # NW corner
+#     tx_max, ty_max = lng_lat_to_tile(maxx, miny, zoom)   # SE corner
+
+#     w_tiles = tx_max - tx_min + 1
+#     h_tiles = ty_max - ty_min + 1
+#     total   = w_tiles * h_tiles
+
+#     if total > 256:
+#         print(f"[WARN] AOI requires {total} tiles — too large, aborting.")
+#         return None
+
+#     print(f"[INFO] Downloading AOI raster: {w_tiles}×{h_tiles} tiles ({total} total)…")
+#     canvas = Image.new("RGB", (w_tiles * TILE_SIZE, h_tiles * TILE_SIZE))
+
+#     for ty in range(ty_min, ty_max + 1):
+#         for tx in range(tx_min, tx_max + 1):
+#             tile = fetch_tile(tx, ty, zoom)
+#             if tile:
+#                 canvas.paste(
+#                     tile,
+#                     ((tx - tx_min) * TILE_SIZE, (ty - ty_min) * TILE_SIZE)
+#                 )
+
+#     return canvas, tx_min, ty_min
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 200 m × 200 m grid slicing
@@ -411,12 +457,6 @@ def run_rf_detr(img: Image.Image) -> list[dict]:
         print("\n" + "=" * 80)
         print("[RF] Starting RF-DETR inference")
 
-        # ─────────────────────────────────────────────────────────────
-        # Original image info
-        # ─────────────────────────────────────────────────────────────
-        print(f"[RF] Original image size: {img.size}")
-        print(f"[RF] Original image mode: {img.mode}")
-
         # Ensure RGB
         if img.mode != "RGB":
             img = img.convert("RGB")
@@ -426,9 +466,6 @@ def run_rf_detr(img: Image.Image) -> list[dict]:
         # Resize image
         # ─────────────────────────────────────────────────────────────
         resized_img = img.resize((575, 575), Image.Resampling.LANCZOS)
-
-        print(f"[RF] Resized image size: {resized_img.size}")
-
         # ─────────────────────────────────────────────────────────────
         # Encode as PNG in memory
         # ─────────────────────────────────────────────────────────────
@@ -436,24 +473,14 @@ def run_rf_detr(img: Image.Image) -> list[dict]:
         resized_img.save(buf, format="PNG")
 
         img_bytes = buf.getvalue()
-
-        print(f"[RF] PNG encoded bytes: {len(img_bytes):,}")
-
         # Base64 encode
         b64 = base64.b64encode(img_bytes).decode()
 
-        print(f"[RF] Base64 length: {len(b64):,}")
-
         data_uri = f"data:image/png;base64,{b64}"
-
-        print(f"[RF] Data URI prefix OK: {data_uri[:30]}...")
 
         # ─────────────────────────────────────────────────────────────
         # Run workflow
         # ─────────────────────────────────────────────────────────────
-        print(f"[RF] Calling workflow:")
-        print(f"      workspace = {RF_WS}")
-        print(f"      workflow  = {RF_WF}")
 
         result = rf_client.run_workflow(
             workspace_name=RF_WS,
@@ -465,12 +492,9 @@ def run_rf_detr(img: Image.Image) -> list[dict]:
         # ─────────────────────────────────────────────────────────────
         # Raw response debug
         # ─────────────────────────────────────────────────────────────
-        print("[RF] Workflow response type:", type(result))
-
+       
         try:
             pretty = json.dumps(result, indent=2)
-            print("[RF] Raw response:")
-            print(pretty[:5000])
         except Exception as e:
             print(f"[RF] Failed to serialize response: {e}")
             print(result)
@@ -484,21 +508,15 @@ def run_rf_detr(img: Image.Image) -> list[dict]:
             print(f"[RF] Response is LIST with {len(result)} items")
 
             for idx, item in enumerate(result):
-                print(f"[RF] Parsing list item {idx}")
+            
 
                 if not isinstance(item, dict):
                     continue
-
-                print(f"[RF] Item keys: {list(item.keys())}")
-
                 # ─────────────────────────────────────────────
                 # NEW: handle model_output
                 # ─────────────────────────────────────────────
                 if "model_output" in item:
                     model_output = item["model_output"]
-
-                    print("[RF] Found model_output")
-                    print(f"[RF] model_output keys: {list(model_output.keys())}")
 
                     preds = model_output.get("predictions", [])
 
@@ -534,9 +552,9 @@ def run_rf_detr(img: Image.Image) -> list[dict]:
         # ─────────────────────────────────────────────────────────────
         print(f"[RF] FINAL DETECTIONS: {len(predictions)}")
 
-        if predictions:
-            print("[RF] First prediction example:")
-            print(json.dumps(predictions[0], indent=2))
+        # if predictions:
+        #     print("[RF] First prediction example:")
+        #     print(json.dumps(predictions[0], indent=2))
 
         print("=" * 80 + "\n")
 
